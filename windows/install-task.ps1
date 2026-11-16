@@ -27,9 +27,12 @@ $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
 $trigger = New-ScheduledTaskTrigger -Weekly -At $At `
     -DaysOfWeek Monday, Tuesday, Wednesday, Thursday, Friday
 
-# StartWhenAvailable: if the PC was off or asleep at the set time, run as soon
-# as it can (like launchd does). The script itself waits for the network.
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable `
+# WakeToRun: wake the PC from sleep at the set time. Needs wake timers
+# allowed in the power plan; can't wake a PC that
+# is shut down, and is unreliable on many Modern Standby laptops.
+# StartWhenAvailable: if the run was missed anyway, run as soon as possible.
+# The script itself waits for the network.
+$settings = New-ScheduledTaskSettingsSet -WakeToRun -StartWhenAvailable `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 45) -MultipleInstances IgnoreNew
 

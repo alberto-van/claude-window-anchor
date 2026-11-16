@@ -4,10 +4,41 @@ Claude's usage limits run in windows that start with your first message.
 This sends Claude a one-word prompt at 06:00 every weekday, so the window has
 already started when you begin work and resets earlier in the day.
 
-It's only worth installing if you regularly hit your Claude usage limit
-during the workday. If you don't, you don't need it.
-
 Works on macOS and Windows.
+
+## Will it help you?
+
+Only if both are true:
+
+1. **You regularly hit your Claude usage limit during the workday.** If you
+   don't, you don't need this.
+2. **Your computer is on or asleep at the set time, with you signed in.** A
+   locked screen is fine. If it's shut down overnight, the run happens when
+   you turn it on, about when you'd send your first message anyway, so you
+   gain nothing.
+
+Sleep needs one more thing, because a sleeping computer doesn't run
+scheduled jobs on its own:
+
+- **Windows:** the installer sets the task to wake the PC (`WakeToRun`). This
+  only works if wake timers are allowed: *Power Options → Change plan
+  settings → Change advanced power settings → Sleep → Allow wake timers →
+  Enable*, for both battery and plugged in. Many laptops with Modern Standby
+  don't honour wake timers reliably, and on a work PC IT may have them
+  turned off.
+- **macOS:** launchd doesn't wake the Mac; a missed run happens at the next
+  wake. To wake it a couple of minutes early on weekdays (needs an admin
+  password, and applies to the whole Mac):
+
+  ```bash
+  sudo pmset repeat wakeorpoweron MTWRF 05:58:00
+  ```
+
+  Undo with `sudo pmset repeat cancel`. Check with `pmset -g sched`.
+
+To see whether it's actually helping, look at the times in the log: runs at
+the set time mean it works; runs at whatever time you opened the laptop mean
+it doesn't.
 
 ## What it does, and what it touches
 
@@ -162,6 +193,7 @@ On Windows, `LastTaskResult` 0 means success and 267009 means still running.
 | `timed out after 120s` on every attempt | Claude hangs on start | Run `claude -p hi` by hand to see why |
 | `network still unreachable` | No connection to api.anthropic.com | Check network, VPN or proxy |
 | Nothing in the log at the set time (macOS) | Job not loaded | Re-run `install.sh` |
+| Runs logged when you open the laptop, not at the set time | Computer was asleep and didn't wake, or was shut down | See [Will it help you?](#will-it-help-you) |
 
 ## Uninstall
 
@@ -172,6 +204,9 @@ On Windows, `LastTaskResult` 0 means success and 267009 means still running.
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$HOME\.claude-trigger\windows\install-task.ps1" -Uninstall
 ```
+
+If you set a wake schedule with `pmset` on macOS, undo it separately with
+`sudo pmset repeat cancel`.
 
 This removes the scheduled job. The repo folder, token and log stay; delete
 them by hand if you want.
