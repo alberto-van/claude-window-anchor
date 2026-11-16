@@ -1,11 +1,15 @@
 #!/bin/zsh
-export PATH="/Users/ordenador12/Library/pnpm/bin:/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home/bin:/Users/ordenador12/Repositorios/scripts/bin:/Users/ordenador12/.nvm/versions/node/v24.19.0/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Library/Apple/usr/bin:/Users/ordenador12/.local/bin:/opt/homebrew/opt/fzf/bin:/Users/ordenador12/Library/Android/sdk/emulator:/Users/ordenador12/Library/Android/sdk/platform-tools:/Users/ordenador12/Library/Android/sdk/cmdline-tools/latest/bin:/Users/ordenador12/.nvm/versions/node/v20.20.2/bin:/Users/ordenador12/.nvm/versions/node/v22.23.1/bin:/Users/ordenador12/.nvm/versions/node/v24.17.0/bin:/Users/ordenador12/Library/pnpm:/Users/ordenador12/bin:/Users/ordenador12/.claude/plugins/cache/claude-plugins-official/figma/2.2.87/bin:/Users/ordenador12/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/394f91d2-9e13-4a00-a14c-c942eedda4a0/d629ac72-9bf6-4123-a0ee-f0eac01ca6c2/bin"
-cd "/Users/ordenador12/.claude-trigger" || exit 1
+# launchd starts jobs with a bare PATH; add the usual places Claude Code installs to.
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+# The folder this script lives in (zsh: absolute path of $0, then its parent).
+REPO_DIR="${0:A:h}"
+cd "$REPO_DIR" || exit 1
 
 # Long-lived token from `claude setup-token` (valid 1 year). Kept in its own
 # chmod-600 file so it never sits in the script. Without it, the script falls
 # back to the interactive login, which expires every few weeks.
-TOKEN_FILE="/Users/ordenador12/.claude-trigger/oauth-token"
+TOKEN_FILE="$REPO_DIR/oauth-token"
 if [ -r "$TOKEN_FILE" ]; then
   export CLAUDE_CODE_OAUTH_TOKEN="$(tr -d '[:space:]' <"$TOKEN_FILE")"
 fi
@@ -25,12 +29,19 @@ case "$(date '+%u')" in
   6|7) log "weekend ($(date '+%A')) — skipping"; exit 0 ;;
 esac
 
+CLAUDE_BIN="$(command -v claude)"
+if [ -z "$CLAUDE_BIN" ]; then
+  log "claude not found — install Claude Code or add it to PATH"
+  notify "claude not found. Install Claude Code or add it to PATH."
+  exit 1
+fi
+
 # Run claude with a hard timeout. Writes output to $1, returns 124 on timeout.
 run_claude() {
   local out_file="$1" pid waited=0
   # Minimal ping: no MCP servers, plugins, settings, skills, tools or saved
   # session, so startup can't hang on connectors. OAuth login still applies.
-  "/opt/homebrew/bin/claude" -p 'Reply with only the word READY. Do not use any tools.' \
+  "$CLAUDE_BIN" -p 'Reply with only the word READY. Do not use any tools.' \
     --model haiku --max-turns 1 \
     --strict-mcp-config --mcp-config '{"mcpServers":{}}' \
     --setting-sources "" --disable-slash-commands --tools "" \
