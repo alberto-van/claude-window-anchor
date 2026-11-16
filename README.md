@@ -175,3 +175,7 @@ powershell -ExecutionPolicy Bypass -File "$HOME\.claude-trigger\windows\install-
 
 This removes the scheduled job. The repo folder, token and log stay; delete
 them by hand if you want.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
