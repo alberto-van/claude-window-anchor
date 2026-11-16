@@ -1,0 +1,8 @@
+# Long-lived Claude token from `claude setup-token`. Never commit it.
+oauth-token
+*token*
+
+# Local backups of the script
+*.bak*
+
+.DS_Store
