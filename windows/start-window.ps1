@@ -43,9 +43,11 @@ if ($today -eq 'Saturday' -or $today -eq 'Sunday') {
     exit 0
 }
 
-# Long-lived token from `claude setup-token`, kept out of the repo.
+# Long-lived token from `claude setup-token`, kept out of the repo. Strip all
+# whitespace, not just the ends: a token copied from a terminal often has a
+# line break where the terminal wrapped it.
 if (Test-Path $TokenFile) {
-    $env:CLAUDE_CODE_OAUTH_TOKEN = (Get-Content -Raw $TokenFile).Trim()
+    $env:CLAUDE_CODE_OAUTH_TOKEN = (Get-Content -Raw $TokenFile) -replace '\s', ''
 }
 
 # Find claude: native installer first, then whatever is on PATH (npm's claude.cmd).
