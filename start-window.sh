@@ -6,6 +6,10 @@ export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/us
 REPO_DIR="${0:A:h}"
 cd "$REPO_DIR" || exit 1
 
+# A scheduled wake on battery is a dark wake that sleeps again after a few
+# seconds. Hold the Mac awake (idle and system sleep) until this script exits.
+caffeinate -is -w $$ &
+
 # Long-lived token from `claude setup-token` (valid 1 year). Kept in its own
 # chmod-600 file so it never sits in the script. Without it, the script falls
 # back to the interactive login, which expires every few weeks.

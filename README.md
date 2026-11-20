@@ -1,7 +1,7 @@
 # claude-window-anchor
 
 Claude's usage limits run in windows that start with your first message.
-This sends Claude a one-word prompt at 06:00 every weekday, so the window has
+This sends Claude a one-word prompt at 05:59 every weekday, so the window has
 already started when you begin work and resets earlier in the day.
 
 Works on macOS and Windows.
@@ -27,12 +27,19 @@ scheduled jobs on its own:
   don't honour wake timers reliably, and on a work PC IT may have them
   turned off.
 - **macOS:** launchd doesn't wake the Mac; a missed run happens at the next
-  wake. To wake it a couple of minutes early on weekdays (needs an admin
-  password, and applies to the whole Mac):
+  wake. The job is set for 05:59, so wake the Mac at 06:00 on weekdays (needs
+  an admin password, and applies to the whole Mac):
 
   ```bash
-  sudo pmset repeat wakeorpoweron MTWRF 05:58:00
+  sudo pmset repeat wakeorpoweron MTWRF 06:00:00
   ```
+
+  Wake *after* the job time, not before: on battery a scheduled wake is a
+  dark wake that sleeps again within seconds, so a 05:58 wake is over before
+  a 06:00 job is due and the run slips to the next background wake (often
+  ~06:14). Waking at 06:00 finds the 05:59 job overdue, launchd runs it
+  immediately, and the script holds the Mac awake with `caffeinate` until it
+  finishes.
 
   Undo with `sudo pmset repeat cancel`. Check with `pmset -g sched`.
 
@@ -122,7 +129,7 @@ Already cloned? `git pull` inside the folder instead.
 macOS:
 
 ```bash
-~/.claude-trigger/install.sh            # 06:00 Mon-Fri
+~/.claude-trigger/install.sh            # 05:59 Mon-Fri
 ~/.claude-trigger/install.sh --at 07:30 # another time
 ```
 

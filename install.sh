@@ -1,8 +1,10 @@
 #!/bin/zsh
-# Installs (or removes) the launchd job that runs start-window.sh at 06:00
+# Installs (or removes) the launchd job that runs start-window.sh at 05:59
 # Monday to Friday. The macOS counterpart of windows/install-task.ps1.
+# 05:59 sits one minute before the 06:00 pmset wake (see README), so the job is
+# already overdue when the Mac wakes and launchd runs it at once.
 #
-#   ./install.sh                 install or update, 06:00
+#   ./install.sh                 install or update, 05:59
 #   ./install.sh --at 07:30      install or update, another time
 #   ./install.sh --uninstall     remove the job (keeps this folder, token and log)
 
@@ -14,7 +16,7 @@ REPO_DIR="${0:A:h}"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="$HOME/Library/Logs/claude-window.log"
 DOMAIN="gui/$(id -u)"
-AT="06:00"
+AT="05:59"
 
 case "$1" in
   --uninstall)
