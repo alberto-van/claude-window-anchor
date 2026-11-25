@@ -18,9 +18,38 @@ if [ -r "$TOKEN_FILE" ]; then
   export CLAUDE_CODE_OAUTH_TOKEN="$(tr -d '[:space:]' <"$TOKEN_FILE")"
 fi
 
-ATTEMPT_TIMEOUT=120                      # kill a hung claude call after this many seconds
+# Fail fast rather than stall. Claude Code's own defaults are generous:
+# API_TIMEOUT_MS is 600000 (10 min) and CLAUDE_CODE_MAX_RETRIES is 10, so a
+# stalled request outlives the watchdog below and gets killed with no error to
+# log -- exactly what happened on 2026-11-25. Keep the API timeout and retries
+# inside ATTEMPT_TIMEOUT so the CLI reports a real failure first, and let this
+# script's own backoff do the retrying.
+export API_TIMEOUT_MS=45000
+export CLAUDE_CODE_MAX_RETRIES=2
+export CLAUDE_CODE_NONSTREAMING_TIMEOUT_RETRIES=0
+export CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=5000   # don't idle 10 min after READY
+
+# Drop startup network calls this ping doesn't need: updates, telemetry, error
+# reporting, feature flags, claude.ai connectors, the session-title request.
+# (Not --bare: that mode ignores CLAUDE_CODE_OAUTH_TOKEN, which we rely on.)
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+export DISABLE_AUTOUPDATER=1
+export CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1
+export ENABLE_CLAUDEAI_MCP_SERVERS=false
+export CLAUDE_CODE_DISABLE_CLAUDE_MDS=1
+export CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1
+export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
+export CLAUDE_CODE_DISABLE_CRON=1
+
+# anthropics/claude-code#78903: a launchd -p run can park waiting on a
+# `/bin/zsh -c -l` shell-snapshot child. Workaround; root cause unconfirmed.
+export SHELL=/bin/sh
+export CLAUDE_CODE_DISABLE_SHELL_HEAD_START=1
+
+ATTEMPT_TIMEOUT=180                      # blind kill; above API_TIMEOUT_MS*retries so the CLI errors first
 NETWORK_WAIT_MAX=600                     # wait up to this long for api.anthropic.com to be reachable
-RETRY_DELAYS=(60 180 300)                # pause before attempts 2, 3 and 4
+RETRY_DELAYS=(60 180 300 600 900 900)    # pauses before attempts 2..7 (~63 min total)
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S %z')] $1"; }
 
@@ -49,6 +78,7 @@ run_claude() {
     --model haiku --max-turns 1 \
     --strict-mcp-config --mcp-config '{"mcpServers":{}}' \
     --setting-sources "" --disable-slash-commands --tools "" \
+    --permission-prompts none \
     --no-chrome --no-session-persistence >"$out_file" 2>&1 &
   pid=$!
   while kill -0 $pid 2>/dev/null; do
@@ -72,8 +102,11 @@ trap 'rm -f "$OUT_FILE"' EXIT
 # After a scheduled wake the network may not be up yet. Any HTTP response
 # (even 404) means the API host is reachable.
 wait_for_network() {
-  local waited=0
-  until curl -s -o /dev/null --max-time 5 https://api.anthropic.com; do
+  local waited=0 code
+  while :; do
+    # curl verifies TLS, so any status here came from the real host, not a portal.
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 https://api.anthropic.com/v1/messages)"
+    [ -n "$code" ] && [ "$code" != "000" ] && break
     if [ $waited -ge $NETWORK_WAIT_MAX ]; then
       log "network still unreachable after ${NETWORK_WAIT_MAX}s — trying anyway"
       return 1
@@ -81,8 +114,16 @@ wait_for_network() {
     sleep 10
     waited=$((waited + 10))
   done
-  [ $waited -gt 0 ] && log "network reachable after ${waited}s"
+  [ $waited -gt 0 ] && log "network reachable (HTTP $code) after ${waited}s"
   return 0
+}
+
+# One-line snapshot of the API path, logged when a call times out so a repeat
+# of 2026-11-25 leaves evidence instead of a bare "timed out".
+probe_api() {
+  curl -s -o /dev/null --max-time 10 \
+    -w 'HTTP %{http_code} dns=%{time_namelookup}s tls=%{time_appconnect}s total=%{time_total}s' \
+    https://api.anthropic.com/v1/messages 2>&1 || echo "curl failed (exit $?)"
 }
 
 MAX_ATTEMPTS=$(( ${#RETRY_DELAYS} + 1 ))
@@ -96,6 +137,16 @@ for attempt in $(seq 1 $MAX_ATTEMPTS); do
 
   OUT="$(tr -d '\n' <"$OUT_FILE")"
   log "failed -> $OUT"
+
+  # A timeout tells us nothing on its own; record the network path right now.
+  case "$OUT" in
+    *"timed out after"*)
+      log "diag: api.anthropic.com -> $(probe_api)"
+      # anthropics/claude-code#91987: a concurrent interactive session can hold
+      # a version-directory lock and stall a headless start.
+      log "diag: other claude processes -> $(pgrep -fl claude 2>/dev/null | grep -cv start-window)"
+      ;;
+  esac
 
   # An expired token will not fix itself in 30s — stop and tell the user.
   case "$OUT" in
