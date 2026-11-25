@@ -10,9 +10,9 @@ $RepoDir          = Split-Path -Parent $PSScriptRoot
 $TokenFile        = Join-Path $RepoDir 'oauth-token'
 $LogDir           = Join-Path $env:LOCALAPPDATA 'claude-window'
 $LogFile          = Join-Path $LogDir 'claude-window.log'
-$AttemptTimeout   = 120              # kill a hung claude call after this many seconds
+$AttemptTimeout   = 180              # blind kill; above API_TIMEOUT_MS*retries so the CLI errors first
 $NetworkWaitMax   = 600              # wait up to this long for api.anthropic.com
-$RetryDelays      = @(60, 180, 300)  # pause before attempts 2, 3 and 4
+$RetryDelays      = @(60, 180, 300, 600, 900, 900)  # pauses before attempts 2..7 (~63 min)
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
@@ -49,6 +49,29 @@ if ($today -eq 'Saturday' -or $today -eq 'Sunday') {
 if (Test-Path $TokenFile) {
     $env:CLAUDE_CODE_OAUTH_TOKEN = (Get-Content -Raw $TokenFile) -replace '\s', ''
 }
+
+# Fail fast rather than stall. Claude Code's own defaults are generous:
+# API_TIMEOUT_MS is 600000 (10 min) and CLAUDE_CODE_MAX_RETRIES is 10, so a
+# stalled request outlives $AttemptTimeout and gets killed with no error to
+# log. Keep both inside $AttemptTimeout so the CLI reports a real failure
+# first, and let this script's own backoff do the retrying.
+$env:API_TIMEOUT_MS                          = '45000'
+$env:CLAUDE_CODE_MAX_RETRIES                 = '2'
+$env:CLAUDE_CODE_NONSTREAMING_TIMEOUT_RETRIES = '0'
+$env:CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS    = '5000'   # don't idle 10 min after READY
+
+# Drop startup network calls this ping does not need: updates, telemetry,
+# error reporting, feature flags, claude.ai connectors, session-title request.
+# (Not --bare: that mode ignores CLAUDE_CODE_OAUTH_TOKEN, which we rely on.)
+$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
+$env:DISABLE_AUTOUPDATER                      = '1'
+$env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE       = '1'
+$env:ENABLE_CLAUDEAI_MCP_SERVERS              = 'false'
+$env:CLAUDE_CODE_DISABLE_CLAUDE_MDS           = '1'
+$env:CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS     = '1'
+$env:CLAUDE_CODE_DISABLE_AUTO_MEMORY          = '1'
+$env:CLAUDE_CODE_DISABLE_BACKGROUND_TASKS     = '1'
+$env:CLAUDE_CODE_DISABLE_CRON                 = '1'
 
 # Find claude: native installer first, then whatever is on PATH (npm's claude.cmd).
 $Claude = Join-Path $env:USERPROFILE '.local\bin\claude.exe'
@@ -102,6 +125,7 @@ $ClaudeArgs = @(
     '--model', 'haiku', '--max-turns', '1',
     '--strict-mcp-config', '--mcp-config', $McpFile,
     '--setting-sources', '', '--disable-slash-commands', '--tools', '',
+    '--permission-prompts', 'none',
     '--no-chrome', '--no-session-persistence'
 )
 

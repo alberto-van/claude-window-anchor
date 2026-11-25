@@ -55,7 +55,7 @@ Each run executes this, with no tools, MCP servers, plugins or settings loaded:
 claude -p "Reply with only the word READY. Do not use any tools." --model haiku --max-turns 1
 ```
 
-It waits for the network, retries up to 4 times, writes a log, and shows a
+It waits for the network, retries up to 7 times over about an hour, writes a log, and shows a
 notification if it fails or your login has expired. That's all. It sends
 nothing anywhere except that prompt to Claude, through the official Claude
 Code CLI you already have installed.
@@ -70,8 +70,49 @@ Code CLI you already have installed.
 
 The job runs as you, only while you're signed in. No admin rights needed.
 
-Exit codes: `0` anchored, `1` gave up after 4 attempts or `claude` not
+Exit codes: `0` anchored, `1` gave up after 7 attempts or `claude` not
 found, `2` login expired or token invalid.
+
+## Why the scripts set these environment variables
+
+Both scripts export a block of Claude Code environment variables before the
+call. Each one closes a way this job failed, or could fail silently.
+
+On 25 November 2026 a run fired on time at 06:00:01 and then all four attempts
+died with `timed out after 120s` and nothing else. The network was fine and the
+same command worked by hand minutes later, but the log gave no clue why. The
+cause was a mismatch of budgets: Claude Code's own `API_TIMEOUT_MS` defaults to
+600000 (10 minutes) and `CLAUDE_CODE_MAX_RETRIES` to 10, so a stalled request
+will sit there far longer than this script's watchdog allows. The watchdog
+always won, killed the process, and threw the error away with it.
+
+| Variable | Set to | Why |
+|---|---|---|
+| `API_TIMEOUT_MS` | `45000` | Default is 10 minutes. The CLI has to give up, and report, before the script's blind kill. |
+| `CLAUDE_CODE_MAX_RETRIES` | `2` | Default is 10. The script's own backoff should own the retrying, not the CLI. |
+| `CLAUDE_CODE_NONSTREAMING_TIMEOUT_RETRIES` | `0` | Fail on the first timeout instead of re-sending. |
+| `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` | `5000` | Print mode otherwise waits up to 10 minutes for background work after the final turn, which looks exactly like a hang after `READY`. |
+| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_AUTOUPDATER`, `CLAUDE_CODE_DISABLE_TERMINAL_TITLE`, `ENABLE_CLAUDEAI_MCP_SERVERS=false` | off | Every startup network call is another chance to hang right after a scheduled wake. Disabling the terminal title also skips a background small-model request. |
+| `CLAUDE_CODE_DISABLE_CLAUDE_MDS`, `_GIT_INSTRUCTIONS`, `_AUTO_MEMORY`, `_BACKGROUND_TASKS`, `_CRON` | off | Nothing a one-word ping needs. Together these took startup from about 4s to 2s. |
+| `SHELL=/bin/sh`, `CLAUDE_CODE_DISABLE_SHELL_HEAD_START` (macOS only) | | Workaround for [#78903](https://github.com/anthropics/claude-code/issues/78903): a launchd `-p` run can park waiting on a `/bin/zsh -c -l` shell-snapshot child. |
+
+`--permission-prompts none` is passed for the same reason: without it a
+headless run waits for a permission host to answer.
+
+**Not `--bare`.** It would cut startup further, but it ignores
+`CLAUDE_CODE_OAUTH_TOKEN`, so it breaks the token file and falls back to the
+interactive login that the token exists to avoid.
+
+### Known upstream hangs
+
+These issues are open, so the settings above improve the odds and make a
+failure legible. They are not a guaranteed fix.
+
+- [#78903](https://github.com/anthropics/claude-code/issues/78903) launchd run parks before the first token; `SHELL=/bin/sh` works around it
+- [#86074](https://github.com/anthropics/claude-code/issues/86074) no API request timeout in print mode; a black-holed TCP connection stalled a run for about 4 hours
+- [#79610](https://github.com/anthropics/claude-code/issues/79610) headless hang with zero output even under `--debug`
+- [#91987](https://github.com/anthropics/claude-code/issues/91987) startup hang when a concurrent interactive session holds a version-directory lock
+- [#89537](https://github.com/anthropics/claude-code/issues/89537) startup deadlock under launchd where `SHELL=/bin/sh` did not help
 
 ## Security notes
 
@@ -197,7 +238,8 @@ On Windows, `LastTaskResult` 0 means success and 267009 means still running.
 |---|---|---|
 | `AUTH EXPIRED`, exit 2 | Login or token expired, or token mistyped | `claude auth login`, or redo step 4 |
 | `claude not found`, exit 1 | Claude Code not installed where the script looks | Install it; the scripts check `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and PATH |
-| `timed out after 120s` on every attempt | Claude hangs on start | Run `claude -p hi` by hand to see why |
+| `timed out after 180s` on every attempt | Claude hangs on start | Read the `diag:` line logged under it, then see [Why the scripts set these environment variables](#why-the-scripts-set-these-environment-variables) |
+| `diag: ... HTTP 405 ...` after a timeout | API was reachable, so the hang was inside the CLI | Known upstream issue; see the list below that section |
 | `network still unreachable` | No connection to api.anthropic.com | Check network, VPN or proxy |
 | Nothing in the log at the set time (macOS) | Job not loaded | Re-run `install.sh` |
 | Runs logged when you open the laptop, not at the set time | Computer was asleep and didn't wake, or was shut down | See [Will it help you?](#will-it-help-you) |
